@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Default Deny All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Child document validator
+    function isValidChild(data) {
+      return data.keys().hasAll(['id', 'name', 'year', 'passcode', 'subjects']) &&
+             data.keys().size() == 5 &&
+             data.id is string && data.id.size() <= 50 &&
+             data.name is string && data.name.size() <= 100 &&
+             data.year is string && data.year.size() <= 50 &&
+             data.passcode is string && data.passcode.size() == 4 &&
+             data.subjects is list && data.subjects.size() <= 20;
+    }
+
+    // TaskLog validator
+    function isValidTaskLog(data) {
+      return data.keys().hasAll(['id', 'childId', 'date', 'completions', 'completedRatio']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.childId is string && data.childId.size() <= 50 &&
+             data.date is string && data.date.size() == 10 &&
+             data.completions is map &&
+             data.completedRatio is number && data.completedRatio >= 0.0 && data.completedRatio <= 1.0;
+    }
+
+    // SummaryReport validator
+    function isValidSummaryReport(data) {
+      return data.keys().hasAll(['id', 'date', 'summary', 'createdAt']) &&
+             data.keys().size() == 4 &&
+             data.id is string && data.id.size() <= 50 &&
+             data.date is string && data.date.size() == 10 &&
+             data.summary is string && data.summary.size() <= 10000;
+    }
+
+    // 1. Children collection (Profiles)
+    match /children/{childId} {
+      allow read: if true; // Public read to list Kate and Damon and run comparisons
+      allow write: if false; // System bootstraps or updates child metadata, client shouldn't modify directly without admin permission
+    }
+
+    // 2. Task Logs
+    match /taskLogs/{logId} {
+      allow read: if true; // Parent needs to fetch all, children can view their historical tasks
+      allow create, update: if isValidId(logId) && isValidTaskLog(incoming());
+      allow delete: if false; // Prevent loss of progress data unless parent overrides
+    }
+
+    // 3. AI Generated Daily Summary Reports
+    match /summaryReports/{reportId} {
+      allow read: if true; // Parents read summary reports
+      allow create, update: if isValidId(reportId) && isValidSummaryReport(incoming());
+      allow delete: if false;
+    }
+  }
+}
